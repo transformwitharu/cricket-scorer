@@ -163,6 +163,21 @@
   </div>
 
   <div class="field">
+    <label>Room code <span id="syncBadge" style="font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(42,139,242,0.25);color:#7fc0ff;font-weight:800;letter-spacing:1px;">CONNECTING…</span></label>
+    <input id="roomCode" type="text" value="Irving" maxlength="20" placeholder="e.g. Irving" style="text-transform:uppercase;">
+    <p style="font-size:11px;opacity:.5;margin-top:7px;line-height:1.4">Everyone who enters the same room code shares one live scoreboard. Keep "Irving" for your regular games, or type a new code for a separate match.</p>
+  </div>
+
+  <div class="field">
+    <label>What are you doing?</label>
+    <div class="seg" id="roleSeg">
+      <button class="seg-btn sel" data-role="score">Score it<small>I'm the scorer</small></button>
+      <button class="seg-btn" data-role="watch">Watch live<small>Just follow the score</small></button>
+    </div>
+  </div>
+
+  <div id="scorerSetup">
+  <div class="field">
     <label>Scoring mode</label>
     <div class="seg" id="modeSeg">
       <button class="seg-btn sel" data-mode="simple">Simple<small>Just tap each ball</small></button>
@@ -218,11 +233,17 @@
   </div>
 
   <button class="btn-primary" id="startBtn" disabled>Start Match</button>
+  </div>
+  <button class="btn-primary" id="watchBtn" style="display:none">Watch Live →</button>
   <p class="mini-note">Works offline once loaded. Add to your home screen for one-tap access at the ground.</p>
 </section>
 
 <!-- ============ MATCH ============ -->
 <section id="match" class="screen">
+  <div id="viewerBanner" style="display:none;background:rgba(42,139,242,0.15);border:1px solid rgba(42,139,242,0.4);border-radius:12px;padding:11px 14px;margin-bottom:12px;font-size:13px;font-weight:700;align-items:center;justify-content:space-between;gap:10px;">
+    <span>👀 Watching live · Room <b id="viewerRoom" style="color:#7fc0ff"></b></span>
+    <button class="icon-btn" id="viewerExit">← Leave</button>
+  </div>
   <div class="board" id="board">
     <div class="board-team">
       <span id="battingTeamName">Team A</span>
@@ -351,21 +372,96 @@
 
 <div class="toast" id="toast"></div>
 
-<script>
+<script type="module">
 /* =========================================================
-   STORAGE LAYER — swap loadHistory/saveHistory for Firebase later
+   FIREBASE — live sync + cloud history
+   ========================================================= */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+import { getDatabase, ref, set, onValue, push, get, child }
+  from "https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD3XApLA2shW4-yHOCHTroBpxyudKFA-iw",
+  authDomain: "cricket-scorer-86cf4.firebaseapp.com",
+  databaseURL: "https://cricket-scorer-86cf4-default-rtdb.firebaseio.com",
+  projectId: "cricket-scorer-86cf4",
+  storageBucket: "cricket-scorer-86cf4.firebasestorage.app",
+  messagingSenderId: "380021049034",
+  appId: "1:380021049034:web:2e9c2cde5d59e35e30d633"
+};
+
+let fbDB=null, fbOK=false;
+try { const app=initializeApp(firebaseConfig); fbDB=getDatabase(app); fbOK=true; }
+catch(e){ console.warn('Firebase init failed, running local-only', e); }
+
+// connection badge (deferred until DOM helpers ready)
+function setBadge(txt,color){ const b=document.getElementById('syncBadge'); if(!b) return; b.textContent=txt; b.style.color=color; }
+if(fbOK){
+  try{ onValue(ref(fbDB,'.info/connected'), snap=>{ setBadge(snap.val()?'LIVE ✓':'CONNECTING…', snap.val()?'#7CFC8A':'#7fc0ff'); }); }catch(e){}
+}
+
+let roomCode=null, isViewer=false, suppressPush=false, viewerUnsub=null;
+function roomRef(){ return ref(fbDB, 'rooms/'+roomCode); }
+
+// Push current live state to the room (scorer only)
+function pushState(){
+  if(!fbOK || isViewer || !roomCode || suppressPush) return;
+  const payload = {
+    teamA:S.teamA, teamB:S.teamB, maxOvers:S.maxOvers, batFirst:S.batFirst,
+    innings:S.innings, mode:S.mode, rosters:S.rosters,
+    data:S.data, finished:!!S.finished, updated:Date.now()
+  };
+  try { set(roomRef(), payload); } catch(e){ console.warn('push failed',e); }
+}
+
+// Viewer subscribes to live updates
+function subscribeRoom(){
+  if(!fbOK || !roomCode) return;
+  viewerUnsub = onValue(roomRef(), snap=>{
+    const v=snap.val();
+    if(!v){ $('viewerWait') && ( $('viewerWait').style.display='block'); return; }
+    // load remote state into S
+    S.teamA=v.teamA; S.teamB=v.teamB; S.maxOvers=v.maxOvers; S.batFirst=v.batFirst;
+    S.innings=v.innings; S.mode=v.mode||'simple'; S.rosters=v.rosters||{A:[],B:[]};
+    S.data=v.data||{1:newInnings(),2:newInnings()};
+    // normalise (Firebase drops empty arrays/objects)
+    [1,2].forEach(i=>{ const d=S.data[i]||newInnings();
+      d.chips=d.chips||[]; d.bat=d.bat||{}; d.bowl=d.bowl||{}; d.history=d.history||[];
+      d.runs=d.runs||0; d.wkts=d.wkts||0; d.balls=d.balls||0; S.data[i]=d; });
+    if(v.finished){ renderViewerResult(); }
+    else { renderMatch(); }
+  });
+}
+
+/* =========================================================
+   HISTORY — cloud (shared) with local fallback
    ========================================================= */
 const STORE_KEY='cricketScorerHistory_v1';
-let memHistory=null; // fallback if localStorage blocked
-function loadHistory(){ try { return JSON.parse(localStorage.getItem(STORE_KEY))||[]; } catch(e){ return []; } }
-function saveHistory(arr){ try { localStorage.setItem(STORE_KEY, JSON.stringify(arr)); memHistory=null; } catch(e){ memHistory=arr; } }
-function getHistory(){ return memHistory!==null ? memHistory : loadHistory(); }
-function appendMatch(rec){ const h=getHistory(); h.unshift(rec); saveHistory(h); if(memHistory!==null) memHistory=h; }
+let memHistory=null;
+function loadHistoryLocal(){ try { return JSON.parse(localStorage.getItem(STORE_KEY))||[]; } catch(e){ return []; } }
+function saveHistoryLocal(arr){ try { localStorage.setItem(STORE_KEY, JSON.stringify(arr)); } catch(e){ memHistory=arr; } }
+
+let cloudHistory=null;
+function appendMatch(rec){
+  // local copy always
+  const local=loadHistoryLocal(); local.unshift(rec); saveHistoryLocal(local);
+  // cloud copy
+  if(fbOK){ try { push(ref(fbDB,'history'), rec); } catch(e){ console.warn('history push failed',e); } }
+}
+function fetchCloudHistory(cb){
+  if(!fbOK){ cb(loadHistoryLocal()); return; }
+  get(ref(fbDB,'history')).then(snap=>{
+    const v=snap.val();
+    if(!v){ cb(loadHistoryLocal()); return; }
+    const arr=Object.values(v).sort((a,b)=> new Date(b.date)-new Date(a.date));
+    cloudHistory=arr; cb(arr);
+  }).catch(()=>cb(loadHistoryLocal()));
+}
 
 /* ========================= STATE ========================= */
 const S = {
   teamA:'Team A', teamB:'Team B', maxOvers:10, batFirst:'A',
-  innings:1, pin:null, mode:'simple',
+  innings:1, pin:null, mode:'simple', finished:false,
   rosters:{ A:[], B:[] },
   data:{ 1:newInnings(), 2:newInnings() },
 };
@@ -375,7 +471,18 @@ const $ = id => document.getElementById(id);
 function show(scr){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); $(scr).classList.add('active'); window.scrollTo(0,0); }
 
 /* ===================== SETUP WIRING ====================== */
-let selOvers=10, selBat=null, pinMode='off';
+let selOvers=10, selBat=null, pinMode='off', selRole='score';
+
+$('roleSeg').addEventListener('click', e=>{
+  const b=e.target.closest('.seg-btn'); if(!b) return;
+  document.querySelectorAll('#roleSeg .seg-btn').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel'); selRole=b.dataset.role;
+  const watch = selRole==='watch';
+  $('scorerSetup').style.display = watch?'none':'block';
+  $('startBtn').style.display = watch?'none':'block';
+  $('watchBtn').style.display = watch?'block':'none';
+});
+$('roomCode').addEventListener('input', e=>{ e.target.value=e.target.value.toUpperCase(); });
 
 $('modeSeg').addEventListener('click', e=>{
   const b=e.target.closest('.seg-btn'); if(!b) return;
@@ -420,18 +527,48 @@ function checkStart(){
 }
 
 $('startBtn').addEventListener('click', ()=>{
+  roomCode = ($('roomCode').value.trim().toUpperCase()) || 'IRVING';
+  isViewer = false;
   S.teamA=$('teamAName').value.trim(); S.teamB=$('teamBName').value.trim();
-  S.maxOvers=selOvers; S.batFirst=selBat; S.innings=1;
+  S.maxOvers=selOvers; S.batFirst=selBat; S.innings=1; S.finished=false;
   S.pin = pinMode==='on' ? $('pinInput').value : null;
   S.rosters.A = S.mode==='detailed' ? parseRoster($('rosterA').value) : [];
   S.rosters.B = S.mode==='detailed' ? parseRoster($('rosterB').value) : [];
   S.data={1:newInnings(),2:newInnings()};
   $('lockBtn').style.display = S.pin ? 'block' : 'none';
+  $('viewerBanner').style.display='none';
   const det=S.mode==='detailed';
   $('detailBar').style.display = det?'grid':'none';
   $('simpleBowlerBar').style.display = det?'none':'block';
   setupInningsPlayers();
   renderMatch(); show('match');
+  pushState();
+});
+
+$('watchBtn').addEventListener('click', ()=>{
+  roomCode = ($('roomCode').value.trim().toUpperCase()) || 'IRVING';
+  isViewer = true;
+  if(!fbOK){ toast('Live view needs internet'); return; }
+  // hide scorer controls, show viewer banner
+  $('viewerBanner').style.display='flex';
+  $('viewerRoom').textContent=roomCode;
+  document.querySelector('.pad').style.display='none';
+  document.querySelector('.controls').style.display='none';
+  $('lockBtn').style.display='none';
+  $('detailBar').style.display='none';
+  $('simpleBowlerBar').style.display='none';
+  $('inningsNote').textContent='Following live…';
+  show('match');
+  subscribeRoom();
+});
+
+$('viewerExit').addEventListener('click', ()=>{
+  if(viewerUnsub){ viewerUnsub(); viewerUnsub=null; }
+  // restore scorer UI bits for next time
+  document.querySelector('.pad').style.display='grid';
+  document.querySelector('.controls').style.display='grid';
+  $('viewerBanner').style.display='none';
+  show('setup');
 });
 
 /* ===================== HELPERS ========================== */
@@ -496,6 +633,7 @@ function record(ev){
     if(d.balls%6===0){ overSummary(); d.chips.push([]); }
   }
   renderMatch();
+  pushState();
   checkInningsEnd();
 }
 function overSummary(){
@@ -535,7 +673,7 @@ $('undoBtn').addEventListener('click',()=>{
   if(!d.history.length){ toast('Nothing to undo'); return; }
   const prev=JSON.parse(d.history.pop());
   d.runs=prev.runs; d.wkts=prev.wkts; d.balls=prev.balls; d.chips=prev.chips; d.bat=prev.bat; d.bowl=prev.bowl;
-  renderMatch();
+  renderMatch(); pushState();
 });
 $('endInningsBtn').addEventListener('click',()=>{
   showConfirm('End this innings now?','This will lock in the current score.',()=>{
@@ -586,6 +724,23 @@ function toast(html){ const t=$('toast'); t.innerHTML=html; t.classList.add('sho
 /* ===================== TOP PERFORMERS ================= */
 function topOf(obj){ let name=null,val=0; for(const k in obj){ if(obj[k]>val){ val=obj[k]; name=k; } } return name?{name,val}:null; }
 
+/* ===================== VIEWER RESULT ================== */
+function renderViewerResult(){
+  // simple: show final score in the board + a note, stay on match screen
+  renderMatch();
+  $('inningsNote').textContent='Match finished';
+  const r1=S.data[1].runs, r2=S.data[2].runs;
+  let msg;
+  if(r1===r2) msg="Tie!";
+  else {
+    const fk=S.batFirst, sk=fk==='A'?'B':'A';
+    const winner = r2>r1 ? teamName(sk) : teamName(fk);
+    msg = `${winner} won`;
+  }
+  $('targetBox').style.display='block';
+  $('targetBox').innerHTML=`🏆 <b>${msg}</b> — ${S.teamA} ${S.data[1].runs}/${S.data[1].wkts} vs ${S.teamB} ${S.data[2].runs}/${S.data[2].wkts}`;
+}
+
 /* ===================== INNINGS BREAK ================== */
 function goToBreak(){
   const key=battingTeamKey(), d=S.data[1];
@@ -600,7 +755,7 @@ function goToBreak(){
     <div class="stat-row"><span>Target to win</span><span class="v">${d.runs+1}</span></div>`;
   show('break');
 }
-$('startSecondBtn').addEventListener('click',()=>{ S.innings=2; setupInningsPlayers(); renderMatch(); show('match'); });
+$('startSecondBtn').addEventListener('click',()=>{ S.innings=2; setupInningsPlayers(); renderMatch(); pushState(); show('match'); });
 
 /* ===================== RESULT ========================= */
 let matchSaved=false;
@@ -633,6 +788,7 @@ function goToResult(){
     <div class="stat-row"><span>${teamName(secondKey)}</span><span class="v">${r2}/${S.data[2].wkts} (${oversText(S.data[2].balls)})</span></div>
     ${starsHtml}`;
   show('result');
+  S.finished=true; pushState();
   generateCommentary(firstKey,secondKey,winnerKey,won,by);
   if(!matchSaved){ matchSaved=true; saveMatchRecord(firstKey,secondKey,winnerKey,won,by); }
 }
@@ -684,8 +840,10 @@ Result: ${won} ${by}`;
 }
 
 /* ===================== HISTORY SCREEN ================= */
-function renderHistory(){
-  const h=getHistory(), list=$('historyList');
+let historyCache=[];
+function paintHistory(h){
+  historyCache=h||[];
+  const list=$('historyList');
   if(!h.length){
     list.innerHTML='<div class="empty-state"><div class="big">🏏</div>No matches saved yet.<br>Finish a match and it\'ll appear here.</div>';
     $('exportBtn').style.display='none'; $('clearHistoryBtn').style.display='none'; return;
@@ -706,18 +864,23 @@ function renderHistory(){
     </div>`;
   }).join('');
 }
-$('historyBtn').addEventListener('click',()=>{ renderHistory(); show('history'); });
-$('resultHistoryBtn').addEventListener('click',()=>{ renderHistory(); show('history'); });
+function openHistory(){
+  $('historyList').innerHTML='<div class="empty-state"><div class="spinner"></div><br>Loading matches…</div>';
+  show('history');
+  fetchCloudHistory(paintHistory);
+}
+$('historyBtn').addEventListener('click', openHistory);
+$('resultHistoryBtn').addEventListener('click', openHistory);
 $('backFromHistory').addEventListener('click',()=>show('setup'));
 $('clearHistoryBtn').addEventListener('click',()=>{
-  showConfirm('Clear all match history?','This permanently deletes every saved match on this device.',()=>{
-    saveHistory([]); memHistory=[]; renderHistory();
+  showConfirm('Clear history on THIS device?','Cloud history (shared) stays. This only clears the local copy on this phone.',()=>{
+    saveHistoryLocal([]); paintHistory(cloudHistory||[]);
   });
 });
 
 /* ===================== CSV EXPORT ===================== */
 $('exportBtn').addEventListener('click',()=>{
-  const h=getHistory(); if(!h.length) return;
+  const h=historyCache; if(!h.length) return;
   const cols=['date','mode','overs','teamFirst','scoreFirst','oversFirst','teamSecond','scoreSecond','oversSecond','winner','topScorer','topWickets','result'];
   const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;
   const rows=[cols.join(',')].concat(h.map(m=>cols.map(c=>esc(m[c])).join(',')));
