@@ -180,6 +180,14 @@
   .rec-chip.w { background:var(--red); }
   .rec-chip.boundary { background:var(--gold); color:var(--ink); }
   .rec-chip.extra { background:rgba(42,139,242,0.3); font-size:11px; }
+
+  /* match-detail scorecard tables */
+  #detailBody table { width:100%; border-collapse:collapse; font-size:14px; }
+  #detailBody td { padding:6px 4px; border-bottom:1px solid var(--line); }
+  #detailBody td.r { text-align:right; font-weight:800; }
+  #detailBody td.ov { opacity:.5; font-weight:800; white-space:nowrap; width:48px; font-size:12px; }
+  #detailBody td.seq { font-family:'Courier New',monospace; letter-spacing:1px; font-size:13px; }
+  #detailBody .summary-card h2 { font-size:16px; font-weight:900; text-transform:none; letter-spacing:0; opacity:1; margin-bottom:4px; }
   @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 </style>
 </head>
@@ -313,9 +321,22 @@
   <div class="bowler-bar" id="bowlerWrap" style="display:none">
     <div class="cap">Bowling ⚾ (tap to change anytime)</div>
     <select id="bowlerSel"></select>
+    <button class="icon-btn" id="addPlayerBtn" style="margin-top:9px;width:100%;border-style:dashed;">+ Add a player mid-match</button>
   </div>
   <div class="bowler-bar" id="simpleBowlerBar">
     <input id="bowlerName" type="text" placeholder="Bowler name (optional)">
+  </div>
+
+  <!-- read-only live info panel (bowler, this-over figures, yet-to-bat) -->
+  <div id="livePanel" style="display:none;background:rgba(0,0,0,0.22);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div><div style="font-size:9px;letter-spacing:1px;text-transform:uppercase;opacity:.5;font-weight:800;">Bowling now ⚾</div><div id="livePanelBowler" style="font-size:15px;font-weight:800;margin-top:2px;">—</div></div>
+      <div style="text-align:right;"><div style="font-size:9px;letter-spacing:1px;text-transform:uppercase;opacity:.5;font-weight:800;">This over</div><div id="livePanelOver" style="font-size:15px;font-weight:800;margin-top:2px;">0 runs</div></div>
+    </div>
+    <div id="livePanelPending" style="margin-top:10px;display:none;">
+      <div style="font-size:9px;letter-spacing:1px;text-transform:uppercase;opacity:.5;font-weight:800;">Yet to bat</div>
+      <div id="livePanelPendingList" style="font-size:13px;font-weight:700;margin-top:3px;opacity:.85;line-height:1.5;">—</div>
+    </div>
   </div>
 
   <div class="over-strip">
@@ -376,6 +397,15 @@
   <div id="historyList"></div>
   <button class="btn-primary" id="exportBtn" style="display:none">⬇ Download Data (CSV)</button>
   <button class="btn-ghost" id="clearHistoryBtn" style="display:none">Clear local copy</button>
+</section>
+
+<!-- ============ MATCH DETAIL (full scorecard) ============ -->
+<section id="matchDetail" class="screen">
+  <div class="topbar">
+    <h1 class="title-stencil" style="margin-bottom:0;font-size:26px">Score<span>card</span></h1>
+    <button class="icon-btn" id="backFromDetail">← Back</button>
+  </div>
+  <div id="detailBody"></div>
 </section>
 
 <!-- ============ EDIT BALLS ============ -->
@@ -441,6 +471,22 @@
       <button class="pin-tog-btn" id="endNonStrike" style="border-radius:12px;">Non-striker</button>
     </div>
     <button class="btn-primary" id="batsmanConfirm" style="margin-top:14px;">Confirm</button>
+  </div>
+</div>
+
+<!-- ============ ADD PLAYER MODAL ============ -->
+<div class="modal-bg" id="addPlayerBg">
+  <div class="modal">
+    <h3>Add a player 🏏</h3>
+    <p>Drop a late arrival into a team's roster — they become available to bat or bowl.</p>
+    <input class="modal-select" id="addPlayerName" type="text" placeholder="Player name" maxlength="20">
+    <p style="font-size:12px;opacity:.6;margin-bottom:8px;">Which team?</p>
+    <div class="modal-row">
+      <button class="pin-tog-btn sel" id="addTeamA" style="border-radius:12px;">Team A</button>
+      <button class="pin-tog-btn" id="addTeamB" style="border-radius:12px;">Team B</button>
+    </div>
+    <button class="btn-primary" id="addPlayerConfirm" style="margin-top:14px;">Add Player</button>
+    <button class="modal-cancel" id="addPlayerCancel">Cancel</button>
   </div>
 </div>
 
@@ -667,6 +713,8 @@ function applyControlUI(){
   $('creaseBar').style.display=det?'grid':'none';
   $('bowlerWrap').style.display=(can && det)?'block':'none';
   $('simpleBowlerBar').style.display=(can && !det)?'block':'none';
+  // read-only live panel: show for VIEWERS in detailed mode (scorer already has the live controls)
+  $('livePanel').style.display=(!can && det)?'block':'none';
   if(can){ $('viewerBanner').style.display='none'; }
   else { $('viewerBanner').style.display='flex'; $('viewerRoom').textContent='Room '+roomCode; $('inningsNote').textContent='Following live…'; }
 }
@@ -782,7 +830,7 @@ $('bowlerSel').addEventListener('change', ()=>{ S.curBowler=$('bowlerSel').value
 function startInningsDetailed(){
   const batKey=battingTeamKey();
   const players=S.rosters[batKey];
-  // openers = first two in the roster; user can change strike via auto-rotation
+  soloMode=false;
   S.crease=[players[0], players[1]];
   S.strikeIdx=0; S.outList=[];
   curInn().openers=[players[0],players[1]];
@@ -812,7 +860,8 @@ function addBall(ev){
   inn.balls.push(ball);
 
   // strike rotation (detailed, only on legal non-wicket deliveries; extras = no rotation)
-  if(S.mode==='detailed'){
+  // In solo mode (last man standing) strike never rotates.
+  if(S.mode==='detailed' && !soloMode){
     if(!ev.wicket){
       if(!ev.extra && (ev.run===1 || ev.run===3)) swapStrike();
     }
@@ -821,10 +870,10 @@ function addBall(ev){
   const wasLegal = !ev.extra;
   const legalCount = deriveInnings(inn).balls;
 
-  // end of over: swap strike (detailed)
+  // end of over: swap strike (detailed, not in solo mode)
   if(wasLegal && legalCount%6===0 && legalCount>0){
     overSummaryToast(legalCount/6);
-    if(S.mode==='detailed') swapStrike();
+    if(S.mode==='detailed' && !soloMode) swapStrike();
   }
 
   // wicket handling
@@ -858,16 +907,25 @@ function overSummaryToast(overNum){
   if(S.mode!=='detailed') $('bowlerName').value='';
 }
 
-let pendingWicket=false;
+let pendingWicket=false, soloMode=false;
 function handleWicketDetailed(){
   // mark current striker out
   const outName=striker();
   if(outName && !S.outList.includes(outName)) S.outList.push(outName);
   const avail=availableBatsmen();
-  if(avail.length===0){ // all out — no replacement
+  if(avail.length===0){
+    // No replacement available. If the OTHER end still has a not-out batsman,
+    // enter last-man-standing: that batsman bats alone, strike locked on him.
+    const partner = S.crease[S.strikeIdx===0?1:0];
+    if(partner && !S.outList.includes(partner)){
+      soloMode=true;
+      // put the surviving partner on strike, empty the out slot
+      S.crease[S.strikeIdx]=null;
+      S.strikeIdx = S.strikeIdx===0?1:0; // surviving partner is on strike
+      toast('Last man standing — batting solo');
+    }
     return;
   }
-  // open the new-batsman picker
   openBatsmanModal(outName);
 }
 
@@ -878,11 +936,15 @@ function checkInningsEnd(){
   let allOut=false;
   if(S.mode==='detailed'){
     const batKey=battingTeamKey();
-    allOut = der.wkts >= Math.max(1, S.rosters[batKey].length-1);
+    const totalPlayers=S.rosters[batKey].length;
+    // With last-man-standing: innings ends only when ALL players are out
+    // (wkts == totalPlayers), not players-1.
+    allOut = der.wkts >= totalPlayers;
   }
   let chaseWon = S.innings===2 && der.runs > deriveInnings(S.data[1]).runs;
   if(oversUp || allOut || chaseWon){
     inn.ended=true;
+    soloMode=false;
     if(S.innings===1) goToBreak(); else goToResult();
   }
 }
@@ -954,6 +1016,34 @@ $('batsmanConfirm').addEventListener('click',()=>{
   else { S.strikeIdx = outSlot; }
   $('batsmanBg').classList.remove('show');
   renderMatch(); pushState();
+});
+
+/* =========================================================
+   ADD PLAYER MID-MATCH
+   ========================================================= */
+let addTeam='A';
+$('addPlayerBtn').addEventListener('click',()=>{
+  $('addPlayerName').value='';
+  // default to the batting team (most common: a late batsman)
+  addTeam=battingTeamKey();
+  $('addTeamA').classList.toggle('sel', addTeam==='A');
+  $('addTeamB').classList.toggle('sel', addTeam==='B');
+  $('addTeamA').textContent=S.teamA; $('addTeamB').textContent=S.teamB;
+  $('addPlayerBg').classList.add('show');
+});
+$('addTeamA').addEventListener('click',()=>{ addTeam='A'; $('addTeamA').classList.add('sel'); $('addTeamB').classList.remove('sel'); });
+$('addTeamB').addEventListener('click',()=>{ addTeam='B'; $('addTeamB').classList.add('sel'); $('addTeamA').classList.remove('sel'); });
+$('addPlayerCancel').addEventListener('click',()=>$('addPlayerBg').classList.remove('show'));
+$('addPlayerConfirm').addEventListener('click',()=>{
+  const nm=$('addPlayerName').value.trim();
+  if(!nm){ toast('Enter a name'); return; }
+  if(S.rosters[addTeam].includes(nm)){ toast('Player already in team'); $('addPlayerBg').classList.remove('show'); return; }
+  S.rosters[addTeam].push(nm);
+  $('addPlayerBg').classList.remove('show');
+  // refresh whichever pickers are affected
+  if(addTeam===bowlingTeamKey()) populateBowlerSelect();
+  toast(nm+' added to '+teamName(addTeam));
+  pushState();
 });
 
 /* =========================================================
@@ -1125,6 +1215,28 @@ function renderMatch(){
       else if(ex){ ex.remove(); }
     });
     if(haveControl && $('bowlerSel').value!==S.curBowler && S.curBowler) $('bowlerSel').value=S.curBowler;
+
+    // populate read-only live panel (mainly for viewers)
+    $('livePanelBowler').textContent = S.curBowler || '—';
+    // this-over figures
+    let or=0, ow=0, count=0;
+    for(let i=inn.balls.length-1; i>=0 && count<6; i--){
+      const b=inn.balls[i];
+      or += (b.run||0)+(b.extra?1:0);
+      if(b.wicket) ow++;
+      if(!b.extra) count++;
+    }
+    $('livePanelOver').textContent = `${or} run${or!==1?'s':''}${ow?(' · '+ow+'w'):''}`;
+    // yet-to-bat list
+    const batKey=battingTeamKey();
+    const yetToBat = S.rosters[batKey].filter(p=> !S.crease.includes(p) && !S.outList.includes(p));
+    if(yetToBat.length){
+      $('livePanelPending').style.display='block';
+      $('livePanelPendingList').textContent = yetToBat.join(' · ');
+    } else {
+      $('livePanelPending').style.display='block';
+      $('livePanelPendingList').textContent = 'None — everyone has batted';
+    }
   }
 
   renderChips();
@@ -1251,6 +1363,12 @@ function saveMatchRecord(firstKey,secondKey,winnerKey,won,by){
   if(S.mode==='detailed'){
     const ts=topName(combinedBat(),'runs'), tw=topName(combinedBowl(),'wkts');
     rec.topScorer=ts?`${ts.name} (${ts.val})`:''; rec.topWickets=tw?`${tw.name} (${tw.val})`:'';
+    // full detail for a complete scorecard later
+    rec.detail = {
+      batFirst:firstKey,
+      inn1:{ balls:S.data[1].balls, bat:batTallies(S.data[1]), bowl:bowlTallies(S.data[1]) },
+      inn2:{ balls:S.data[2].balls, bat:batTallies(S.data[2]), bowl:bowlTallies(S.data[2]) }
+    };
   }
   // local
   const local=loadHistoryLocal(); local.unshift(rec); saveHistoryLocal(local);
@@ -1264,13 +1382,81 @@ function paintHistory(h){
   const list=$('historyList');
   if(!h.length){ list.innerHTML='<div class="empty-state"><div class="big">🏏</div>No matches saved yet.<br>Finish a match and it\'ll appear here.</div>'; $('exportBtn').style.display='none'; $('clearHistoryBtn').style.display='none'; return; }
   $('exportBtn').style.display='block'; $('clearHistoryBtn').style.display='block';
-  list.innerHTML=h.map(m=>{
+  list.innerHTML=h.map((m,idx)=>{
     const d=new Date(m.date), ds=d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
     let stars='';
     if(m.mode==='detailed' && (m.topScorer||m.topWickets)) stars=`<div class="hist-stars">${m.topScorer?`🏏 <b>${m.topScorer}</b>`:''}${m.topScorer&&m.topWickets?' · ':''}${m.topWickets?`⚾ <b>${m.topWickets}</b>`:''}</div>`;
-    return `<div class="hist-item"><div class="hist-top"><span class="hist-date">${ds}</span><span class="hist-mode">${m.mode}</span></div><div class="hist-result">${m.result}</div><div class="hist-scores">${m.teamFirst}: ${m.scoreFirst} (${m.oversFirst})<br>${m.teamSecond}: ${m.scoreSecond} (${m.oversSecond})</div>${stars}</div>`;
+    const tappable = m.detail ? ' style="cursor:pointer;"' : '';
+    const arrow = m.detail ? '<div style="font-size:11px;opacity:.5;margin-top:8px;font-weight:800;">Tap for full scorecard →</div>' : '';
+    return `<div class="hist-item" data-idx="${idx}"${tappable}><div class="hist-top"><span class="hist-date">${ds}</span><span class="hist-mode">${m.mode}</span></div><div class="hist-result">${m.result}</div><div class="hist-scores">${m.teamFirst}: ${m.scoreFirst} (${m.oversFirst})<br>${m.teamSecond}: ${m.scoreSecond} (${m.oversSecond})</div>${stars}${arrow}</div>`;
   }).join('');
+  list.querySelectorAll('.hist-item').forEach(it=>{
+    it.addEventListener('click',()=>{
+      const m=historyCache[+it.dataset.idx];
+      if(m && m.detail) renderMatchDetail(m);
+    });
+  });
 }
+
+/* ---- full scorecard from a saved history record ---- */
+function renderMatchDetail(m){
+  const det=m.detail;
+  function parseOvers(balls){
+    // group balls into overs by legal count, return array of {seq, runs, wk, cum}
+    const overs=[]; let cur=[]; let legal=0, cum=0;
+    (balls||[]).forEach(b=>{
+      let label=b.wicket?'W':(b.extra==='wide'?'Wd':(b.extra==='noball'?'Nb'+(b.run||''):String(b.run)));
+      cur.push(label);
+      cum += (b.run||0)+(b.extra?1:0);
+      cur._cum=cum;
+      if(!b.extra){ legal++; if(legal%6===0){ overs.push({balls:cur.slice(), cum}); cur=[]; } }
+    });
+    if(cur.length) overs.push({balls:cur.slice(), cum});
+    return overs;
+  }
+  function batTable(bat){
+    const rows=Object.entries(bat||{}).sort((a,b)=>b[1].runs-a[1].runs);
+    if(!rows.length) return '<div style="opacity:.4;font-size:13px;">No batting data</div>';
+    return '<table>'+rows.map(([n,t])=>`<tr><td>${n}</td><td class="r">${t.runs} (${t.balls})</td></tr>`).join('')+'</table>';
+  }
+  function bowlTable(bowl){
+    const rows=Object.entries(bowl||{}).sort((a,b)=>b[1].wkts-a[1].wkts);
+    if(!rows.length) return '<div style="opacity:.4;font-size:13px;">No bowling data</div>';
+    return '<table>'+rows.map(([n,t])=>{
+      const ov=Math.floor(t.balls/6)+'.'+(t.balls%6);
+      return `<tr><td>${n}</td><td class="r">${t.wkts}w · ${t.runs}r · ${ov}ov</td></tr>`;
+    }).join('')+'</table>';
+  }
+  function oversTable(balls){
+    const overs=parseOvers(balls);
+    if(!overs.length) return '';
+    return '<table>'+overs.map((o,i)=>`<tr><td class="ov">Ov ${i+1}</td><td class="seq">${o.balls.join(' ')}</td><td class="r">${o.cum}</td></tr>`).join('')+'</table>';
+  }
+  const innFirst=det.inn1, innSecond=det.inn2;
+  const body=$('detailBody');
+  body.innerHTML=`
+    <div class="result" style="background:linear-gradient(160deg,var(--gold),#b8860b);color:#08172b;text-align:center;padding:16px;border-radius:14px;font-size:17px;font-weight:900;margin-bottom:18px;">🏆 ${m.result}</div>
+    <div class="summary-card">
+      <h2>${m.teamFirst} — ${m.scoreFirst} (${m.oversFirst})</h2>
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:6px 0 6px;">Batting</h3>
+      ${batTable(innFirst.bat)}
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:14px 0 6px;">Bowling</h3>
+      ${bowlTable(innFirst.bowl)}
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:14px 0 6px;">Over by over</h3>
+      ${oversTable(innFirst.balls)}
+    </div>
+    <div class="summary-card">
+      <h2>${m.teamSecond} — ${m.scoreSecond} (${m.oversSecond})</h2>
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:6px 0 6px;">Batting</h3>
+      ${batTable(innSecond.bat)}
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:14px 0 6px;">Bowling</h3>
+      ${bowlTable(innSecond.bowl)}
+      <h3 style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.55;font-weight:800;margin:14px 0 6px;">Over by over</h3>
+      ${oversTable(innSecond.balls)}
+    </div>`;
+  show('matchDetail');
+}
+$('backFromDetail').addEventListener('click',()=>show('history'));
 function openHistory(){
   $('historyList').innerHTML='<div class="empty-state"><div class="spinner"></div><br>Loading matches…</div>';
   show('history');
