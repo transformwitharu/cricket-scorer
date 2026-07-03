@@ -188,6 +188,20 @@
   #detailBody td.ov { opacity:.5; font-weight:800; white-space:nowrap; width:48px; font-size:12px; }
   #detailBody td.seq { font-family:'Courier New',monospace; letter-spacing:1px; font-size:13px; }
   #detailBody .summary-card h2 { font-size:16px; font-weight:900; text-transform:none; letter-spacing:0; opacity:1; margin-bottom:4px; }
+
+  /* squad picker chips */
+  .squad-chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .squad-chip { padding:9px 14px; border-radius:20px; border:2px solid var(--line); background:rgba(255,255,255,0.05); color:var(--chalk); font-weight:700; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .squad-chip.inA { border-color:var(--red); background:rgba(214,48,49,0.18); }
+  .squad-chip.inB { border-color:var(--blue); background:rgba(42,139,242,0.18); }
+  .squad-chip .x { opacity:.5; font-weight:900; }
+  .squad-empty { opacity:.4; font-size:13px; padding:8px 0; }
+  .squad-mgr-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line); gap:10px; }
+  .squad-mgr-row:last-child { border:none; }
+  .squad-mgr-row .nm { font-weight:700; font-size:15px; flex:1; }
+  .squad-mgr-row button { background:rgba(255,255,255,0.08); border:1px solid var(--line); border-radius:8px; padding:6px 10px; color:var(--chalk); cursor:pointer; font-size:13px; font-weight:800; }
+  @keyframes coinspin { 0%{transform:rotateY(0);} 100%{transform:rotateY(1800deg);} }
+  #coin.spinning { animation:coinspin 1.1s ease-out; }
   @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 </style>
 </head>
@@ -227,8 +241,8 @@
   <div class="field">
     <label>Scoring mode</label>
     <div class="seg" id="modeSeg">
-      <button class="seg-btn sel" data-mode="simple">Simple<small>Just tap each ball</small></button>
-      <button class="seg-btn" data-mode="detailed">Detailed<small>Batsmen &amp; bowlers</small></button>
+      <button class="seg-btn sel" data-mode="detailed">Detailed<small>Batsmen &amp; bowlers</small></button>
+      <button class="seg-btn" data-mode="simple">Simple<small>Just tap each ball</small></button>
     </div>
   </div>
 
@@ -237,8 +251,8 @@
     <input id="teamAName" type="text" placeholder="e.g. Royal Strikers" maxlength="20">
   </div>
   <div class="field" id="rosterAField" style="display:none">
-    <label>Team A players (one per line)</label>
-    <textarea id="rosterA" placeholder="Ravi&#10;Sunil&#10;Arjun&#10;..."></textarea>
+    <label>Team A players <span id="rosterACount" style="opacity:.5;font-weight:600;">(0)</span></label>
+    <div id="teamAChips" class="squad-chips"></div>
   </div>
 
   <div class="field">
@@ -246,8 +260,18 @@
     <input id="teamBName" type="text" placeholder="e.g. Sunday Warriors" maxlength="20">
   </div>
   <div class="field" id="rosterBField" style="display:none">
-    <label>Team B players (one per line)</label>
-    <textarea id="rosterB" placeholder="Vikram&#10;Deepak&#10;Karan&#10;..."></textarea>
+    <label>Team B players <span id="rosterBCount" style="opacity:.5;font-weight:600;">(0)</span></label>
+    <div id="teamBChips" class="squad-chips"></div>
+  </div>
+
+  <div class="field" id="squadField" style="display:none">
+    <label>Squad — tap a name to add to a team</label>
+    <div id="squadList" class="squad-chips"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input id="newSquadName" type="text" placeholder="Add a new player" maxlength="20" style="flex:1;padding:11px 14px;font-size:14px;">
+      <button class="icon-btn" id="addSquadBtn" style="border-style:dashed;">+ Add</button>
+    </div>
+    <button class="icon-btn" id="manageSquadBtn" style="width:100%;margin-top:8px;">⚙️ Manage squad</button>
   </div>
 
   <div class="field">
@@ -267,6 +291,7 @@
       <button class="pick-btn" data-bat="A">Team A</button>
       <button class="pick-btn" data-bat="B">Team B</button>
     </div>
+    <button class="icon-btn" id="tossBtn" style="width:100%;margin-top:10px;border-style:dashed;">🪙 Flip a coin to decide</button>
   </div>
 
   <div class="field">
@@ -509,6 +534,28 @@
   </div>
 </div>
 
+<!-- ============ COIN FLIP MODAL ============ -->
+<div class="modal-bg" id="tossBg">
+  <div class="modal" style="text-align:center;">
+    <h3 id="tossTitle">Toss</h3>
+    <p id="tossSub">Flipping the coin…</p>
+    <div id="coin" style="width:120px;height:120px;border-radius:50%;margin:20px auto;background:linear-gradient(145deg,var(--gold),#b8860b);display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:900;color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.4);">🪙</div>
+    <div id="tossResult" style="font-size:18px;font-weight:900;min-height:26px;margin-bottom:8px;"></div>
+    <button class="btn-primary" id="tossAgain" style="display:none;margin-top:4px;">Flip Again</button>
+    <button class="modal-cancel" id="tossClose">Close</button>
+  </div>
+</div>
+
+<!-- ============ MANAGE SQUAD MODAL ============ -->
+<div class="modal-bg" id="squadMgrBg">
+  <div class="modal">
+    <h3>Manage Squad</h3>
+    <p>Tap ✎ to rename or 🗑 to remove a player from the saved squad.</p>
+    <div id="squadMgrList"></div>
+    <button class="modal-cancel" id="squadMgrClose" style="margin-top:14px;">Done</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script type="module">
@@ -549,7 +596,7 @@ if(fbOK){
 function newInnings(){ return { balls:[], allOut:false, ended:false, openers:null }; }
 const S = {
   teamA:'Team A', teamB:'Team B', maxOvers:10, batFirst:'A',
-  innings:1, pin:null, mode:'simple', finished:false,
+  innings:1, pin:null, mode:'detailed', finished:false,
   rosters:{ A:[], B:[] },
   // detailed: who's at the crease right now [strikerName, nonStrikerName], and strike index
   crease:[null,null], strikeIdx:0, curBowler:null, outList:[],
@@ -611,11 +658,15 @@ $('modeSeg').addEventListener('click', e=>{
   const b=e.target.closest('.seg-btn'); if(!b) return;
   document.querySelectorAll('#modeSeg .seg-btn').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel'); S.mode=b.dataset.mode;
+  updateSquadVisibility();
+  checkStart();
+});
+function updateSquadVisibility(){
   const det=S.mode==='detailed';
   $('rosterAField').style.display=det?'block':'none';
   $('rosterBField').style.display=det?'block':'none';
-  checkStart();
-});
+  $('squadField').style.display=det?'block':'none';
+}
 $('oversRow').addEventListener('click', e=>{
   const b=e.target.closest('.overs-btn'); if(!b) return;
   document.querySelectorAll('.overs-btn').forEach(x=>x.classList.remove('sel'));
@@ -630,19 +681,120 @@ $('battingPick').addEventListener('click', e=>{
   document.querySelectorAll('#battingPick .pick-btn').forEach(x=>x.classList.remove('sel-red','sel-blue'));
   selBat=b.dataset.bat; b.classList.add(selBat==='A'?'sel-red':'sel-blue'); checkStart();
 });
-['teamAName','teamBName','rosterA','rosterB'].forEach(id=>$(id).addEventListener('input',checkStart));
+['teamAName','teamBName'].forEach(id=>$(id).addEventListener('input',checkStart));
 $('roomCode').addEventListener('input', e=>{ e.target.value=e.target.value.toUpperCase(); });
 $('pinOff').addEventListener('click',()=>{ pinMode='off'; $('pinOff').classList.add('sel'); $('pinOn').classList.remove('sel'); $('pinInput').style.display='none'; checkStart(); });
 $('pinOn').addEventListener('click',()=>{ pinMode='on'; $('pinOn').classList.add('sel'); $('pinOff').classList.remove('sel'); $('pinInput').style.display='block'; $('pinInput').focus(); checkStart(); });
 $('pinInput').addEventListener('input',e=>{ e.target.value=e.target.value.replace(/\D/g,''); checkStart(); });
 
-function parseRoster(t){ return t.split('\n').map(s=>s.trim()).filter(Boolean); }
+/* ===== SQUAD DATABASE (cloud master list) ===== */
+let squad=[];            // master list of names
+let teamPick={A:[], B:[]}; // this week's selection
+function squadRef(){ return ref(fbDB,'players'); }
+function loadSquad(){
+  if(!fbOK){ squad=[]; renderSquad(); return; }
+  try{ onValue(squadRef(), snap=>{ const v=snap.val(); squad = v ? Object.values(v) : []; squad.sort((a,b)=>a.localeCompare(b)); renderSquad(); }); }catch(e){}
+}
+function saveSquad(){ if(fbOK){ try{ set(squadRef(), squad); }catch(e){} } }
+function addToSquad(name){
+  name=name.trim(); if(!name) return false;
+  if(squad.some(s=>s.toLowerCase()===name.toLowerCase())) return false;
+  squad.push(name); squad.sort((a,b)=>a.localeCompare(b)); saveSquad(); renderSquad(); return true;
+}
+function renderSquad(){
+  // master list — each name tappable to assign A or B
+  const box=$('squadList');
+  if(!box) return;
+  if(!squad.length){ box.innerHTML='<div class="squad-empty">No saved players yet. Add names below — they\'ll be saved for every game.</div>'; }
+  else {
+    box.innerHTML = squad.map(n=>{
+      let cls='squad-chip'; if(teamPick.A.includes(n)) cls+=' inA'; else if(teamPick.B.includes(n)) cls+=' inB';
+      let tag=''; if(teamPick.A.includes(n)) tag=' · A'; else if(teamPick.B.includes(n)) tag=' · B';
+      return `<span class="${cls}" data-name="${n}">${n}${tag}</span>`;
+    }).join('');
+    box.querySelectorAll('.squad-chip').forEach(c=> c.addEventListener('click',()=> cycleAssign(c.dataset.name)));
+  }
+  renderTeamChips();
+}
+// tap cycles: unassigned -> A -> B -> unassigned
+function cycleAssign(name){
+  if(teamPick.A.includes(name)){ teamPick.A=teamPick.A.filter(x=>x!==name); teamPick.B.push(name); }
+  else if(teamPick.B.includes(name)){ teamPick.B=teamPick.B.filter(x=>x!==name); }
+  else { teamPick.A.push(name); }
+  renderSquad(); checkStart();
+}
+function renderTeamChips(){
+  const a=$('teamAChips'), b=$('teamBChips');
+  if(a){ a.innerHTML = teamPick.A.length? teamPick.A.map(n=>`<span class="squad-chip inA" data-name="${n}">${n} <span class="x">×</span></span>`).join('') : '<div class="squad-empty">Tap names below to add</div>'; a.querySelectorAll('.squad-chip').forEach(c=>c.addEventListener('click',()=>{ teamPick.A=teamPick.A.filter(x=>x!==c.dataset.name); renderSquad(); checkStart(); })); }
+  if(b){ b.innerHTML = teamPick.B.length? teamPick.B.map(n=>`<span class="squad-chip inB" data-name="${n}">${n} <span class="x">×</span></span>`).join('') : '<div class="squad-empty">Tap names below to add</div>'; b.querySelectorAll('.squad-chip').forEach(c=>c.addEventListener('click',()=>{ teamPick.B=teamPick.B.filter(x=>x!==c.dataset.name); renderSquad(); checkStart(); })); }
+  if($('rosterACount')) $('rosterACount').textContent='('+teamPick.A.length+')';
+  if($('rosterBCount')) $('rosterBCount').textContent='('+teamPick.B.length+')';
+}
+$('addSquadBtn').addEventListener('click',()=>{
+  const nm=$('newSquadName').value.trim(); if(!nm){ toast('Enter a name'); return; }
+  const added=addToSquad(nm);
+  if(added){ teamPick.A.push(nm); renderSquad(); checkStart(); toast(nm+' added'); }
+  else toast('Already in squad');
+  $('newSquadName').value='';
+});
+$('newSquadName').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('addSquadBtn').click(); } });
+
+/* manage squad (edit/delete) */
+$('manageSquadBtn').addEventListener('click',()=>{ renderSquadMgr(); $('squadMgrBg').classList.add('show'); });
+$('squadMgrClose').addEventListener('click',()=>$('squadMgrBg').classList.remove('show'));
+function renderSquadMgr(){
+  const box=$('squadMgrList');
+  if(!squad.length){ box.innerHTML='<div class="squad-empty">Squad is empty.</div>'; return; }
+  box.innerHTML=squad.map(n=>`<div class="squad-mgr-row"><span class="nm">${n}</span><span><button data-edit="${n}">✎</button> <button data-del="${n}">🗑</button></span></div>`).join('');
+  box.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{
+    const nm=b.dataset.del; squad=squad.filter(x=>x!==nm); teamPick.A=teamPick.A.filter(x=>x!==nm); teamPick.B=teamPick.B.filter(x=>x!==nm);
+    saveSquad(); renderSquad(); renderSquadMgr(); checkStart();
+  }));
+  box.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{
+    const old=b.dataset.edit; const nn=prompt('Rename player:', old); if(!nn||!nn.trim()||nn===old) return;
+    const nm=nn.trim();
+    squad=squad.map(x=>x===old?nm:x); teamPick.A=teamPick.A.map(x=>x===old?nm:x); teamPick.B=teamPick.B.map(x=>x===old?nm:x);
+    squad.sort((a,b)=>a.localeCompare(b)); saveSquad(); renderSquad(); renderSquadMgr(); checkStart();
+  }));
+}
+
+/* ===== COIN FLIP TOSS ===== */
+$('tossBtn').addEventListener('click',()=>{
+  const nameA=$('teamAName').value.trim()||'Team A';
+  const nameB=$('teamBName').value.trim()||'Team B';
+  $('tossTitle').textContent='Toss';
+  $('tossSub').textContent='Flipping…';
+  $('tossResult').textContent=''; $('tossAgain').style.display='none';
+  $('tossBg').classList.add('show');
+  doFlip(nameA,nameB);
+});
+function doFlip(nameA,nameB){
+  const coin=$('coin'); coin.classList.remove('spinning'); void coin.offsetWidth; coin.classList.add('spinning');
+  $('coin').textContent='🪙';
+  setTimeout(()=>{
+    const winA=Math.random()<0.5;
+    const winner = winA?nameA:nameB;
+    const batKey = winA?'A':'B';
+    coin.textContent = winA?'A':'B';
+    $('tossSub').textContent='Winner bats first';
+    $('tossResult').innerHTML=`🏏 <b>${winner}</b> bats first`;
+    $('tossAgain').style.display='block';
+    // auto-select who bats first
+    selBat=batKey;
+    document.querySelectorAll('#battingPick .pick-btn').forEach(x=>x.classList.remove('sel-red','sel-blue'));
+    document.querySelector(`#battingPick [data-bat="${batKey}"]`).classList.add(batKey==='A'?'sel-red':'sel-blue');
+    checkStart();
+  },1150);
+}
+$('tossAgain').addEventListener('click',()=>{ const a=$('teamAName').value.trim()||'Team A'; const b=$('teamBName').value.trim()||'Team B'; $('tossResult').textContent=''; doFlip(a,b); });
+$('tossClose').addEventListener('click',()=>$('tossBg').classList.remove('show'));
+
 function checkStart(){
   const base = selBat && $('teamAName').value.trim() && $('teamBName').value.trim();
   const pinOk = pinMode==='off' || $('pinInput').value.length===4;
   const oversOk = selOvers>=1;
   let rosterOk=true;
-  if(S.mode==='detailed') rosterOk = parseRoster($('rosterA').value).length>=2 && parseRoster($('rosterB').value).length>=2;
+  if(S.mode==='detailed') rosterOk = teamPick.A.length>=2 && teamPick.B.length>=2;
   $('startBtn').disabled = !(base && pinOk && oversOk && rosterOk);
 }
 
@@ -785,8 +937,8 @@ $('startBtn').addEventListener('click', ()=>{
   S.teamA=$('teamAName').value.trim(); S.teamB=$('teamBName').value.trim();
   S.maxOvers=selOvers; S.batFirst=selBat; S.innings=1; S.finished=false;
   S.pin = pinMode==='on' ? $('pinInput').value : null;
-  S.rosters.A = S.mode==='detailed' ? parseRoster($('rosterA').value) : [];
-  S.rosters.B = S.mode==='detailed' ? parseRoster($('rosterB').value) : [];
+  S.rosters.A = S.mode==='detailed' ? teamPick.A.slice() : [];
+  S.rosters.B = S.mode==='detailed' ? teamPick.B.slice() : [];
   S.data={1:newInnings(),2:newInnings()};
   S.crease=[null,null]; S.strikeIdx=0; S.curBowler=null; S.outList=[];
   haveControl=true; isViewer=false;
@@ -1039,6 +1191,7 @@ $('addPlayerConfirm').addEventListener('click',()=>{
   if(!nm){ toast('Enter a name'); return; }
   if(S.rosters[addTeam].includes(nm)){ toast('Player already in team'); $('addPlayerBg').classList.remove('show'); return; }
   S.rosters[addTeam].push(nm);
+  addToSquad(nm); // also save to the master squad for next time
   $('addPlayerBg').classList.remove('show');
   // refresh whichever pickers are affected
   if(addTeam===bowlingTeamKey()) populateBowlerSelect();
@@ -1519,13 +1672,14 @@ Result: ${won} ${by}`;
    NEW MATCH
    ========================================================= */
 $('newMatchBtn').addEventListener('click',()=>{
-  matchSaved=false; selBat=null; selOvers=10; pinMode='off'; S.mode='simple'; selRole='score'; S.finished=false;
+  matchSaved=false; selBat=null; selOvers=10; pinMode='off'; S.mode='detailed'; selRole='score'; S.finished=false;
   haveControl=false; isViewer=false;
   if(viewerUnsub){ viewerUnsub(); viewerUnsub=null; }
   document.querySelectorAll('#roleSeg .seg-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-role="score"]').classList.add('sel');
   $('scorerSetup').style.display='block'; $('startBtn').style.display='block'; $('watchBtn').style.display='none';
-  document.querySelectorAll('#modeSeg .seg-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-mode="simple"]').classList.add('sel');
-  $('rosterAField').style.display='none'; $('rosterBField').style.display='none'; $('rosterA').value=''; $('rosterB').value='';
+  document.querySelectorAll('#modeSeg .seg-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-mode="detailed"]').classList.add('sel');
+  teamPick={A:[],B:[]}; updateSquadVisibility(); renderSquad();
+  $('rosterAField').style.display='none'; $('rosterBField').style.display='none';
   document.querySelectorAll('#battingPick .pick-btn').forEach(x=>x.classList.remove('sel-red','sel-blue'));
   document.querySelectorAll('.overs-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-ov="10"]').classList.add('sel');
   $('oversCustom').value=''; $('oversCustom').style.display='none';
@@ -1538,6 +1692,8 @@ $('newMatchBtn').addEventListener('click',()=>{
    BOOT
    ========================================================= */
 watchLiveList();
+loadSquad();
+updateSquadVisibility();
 </script>
 </body>
 </html>
