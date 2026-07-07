@@ -410,6 +410,7 @@
   </div>
   <div class="summary-card" id="resultSummary"></div>
   <button class="btn-primary" id="newMatchBtn">New Match</button>
+  <button class="btn-primary" id="rematchBtn" style="background:var(--blue);box-shadow:0 6px 0 var(--blue-dark);color:#fff;">🔁 Rematch — Same Players</button>
   <button class="btn-ghost" id="resultHistoryBtn">📊 View Match History</button>
 </section>
 
@@ -1672,21 +1673,39 @@ Result: ${won} ${by}`;
    NEW MATCH
    ========================================================= */
 $('newMatchBtn').addEventListener('click',()=>{
+  resetSetup(true); // full reset — clear teams
+});
+
+$('rematchBtn').addEventListener('click',()=>{
+  // capture current teams BEFORE resetting
+  const keepA = S.rosters.A ? S.rosters.A.slice() : [];
+  const keepB = S.rosters.B ? S.rosters.B.slice() : [];
+  const nameA = S.teamA, nameB = S.teamB;
+  resetSetup(false); // reset match state but we'll re-fill teams
+  // restore names + players
+  $('teamAName').value = nameA;
+  $('teamBName').value = nameB;
+  teamPick = { A: keepA, B: keepB };
+  renderSquad();
+  toast('Same players loaded — edit if needed, then start');
+  checkStart();
+});
+
+function resetSetup(clearTeams){
   matchSaved=false; selBat=null; selOvers=10; pinMode='off'; S.mode='detailed'; selRole='score'; S.finished=false;
   haveControl=false; isViewer=false;
   if(viewerUnsub){ viewerUnsub(); viewerUnsub=null; }
   document.querySelectorAll('#roleSeg .seg-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-role="score"]').classList.add('sel');
   $('scorerSetup').style.display='block'; $('startBtn').style.display='block'; $('watchBtn').style.display='none';
   document.querySelectorAll('#modeSeg .seg-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-mode="detailed"]').classList.add('sel');
-  teamPick={A:[],B:[]}; updateSquadVisibility(); renderSquad();
-  $('rosterAField').style.display='none'; $('rosterBField').style.display='none';
+  if(clearTeams){ teamPick={A:[],B:[]}; $('teamAName').value=''; $('teamBName').value=''; }
+  updateSquadVisibility(); renderSquad();
   document.querySelectorAll('#battingPick .pick-btn').forEach(x=>x.classList.remove('sel-red','sel-blue'));
   document.querySelectorAll('.overs-btn').forEach(x=>x.classList.remove('sel')); document.querySelector('[data-ov="10"]').classList.add('sel');
   $('oversCustom').value=''; $('oversCustom').style.display='none';
-  $('teamAName').value=''; $('teamBName').value='';
   $('pinOff').classList.add('sel'); $('pinOn').classList.remove('sel'); $('pinInput').value=''; $('pinInput').style.display='none';
   checkStart(); show('setup');
-});
+}
 
 /* =========================================================
    BOOT
